@@ -285,7 +285,7 @@ def main():
         #draw_road(start_pos_scv,Ls_scv,3.5,1,thetas_scv)
 
         ##複合経路も作れる
-        draw_road(start_pos_sc,Ls_sc+Ls_scv,7,2,thetas_sc+thetas_scv)
+        draw_road(start_pos_sc,Ls_sc+Ls_scv,4,1,thetas_sc+thetas_scv)
         # 車輪の軌跡の描画
         for rec in [lf_rec,rf_rec,lb_rec,rb_rec]:
             for r in rec:
