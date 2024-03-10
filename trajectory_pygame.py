@@ -4,26 +4,90 @@ from pygame.locals import *
 import sys
 import math
 import time
+import random
 SCREEN_SIZE = (1000, 800)
-OFFSET = 100
+OFFSET = 200
+NT_ZONE_HT = 30 
 STEER_RATE = (SCREEN_SIZE[0]/2)/(math.pi/4.5)
 DRAW_SCALE = 20#計算上の単位(m)から描画単位(px)への変換
 wheel_len = 0.38
 wheel_wid = 0.2
 dt = 0.01
-
-"""
-使い方
-- center_attachの切り替えにより、視点を道路固定にするか車両固定にするか選べるよ
-- draw_road()に色々な経路を合体・自作して代入すると色々な道が楽しめるよ
-- draw_road()は経路全体を折線を中心とした四角形の集合として描画するよ
-- draw_road()のnumは1か2だよ 2の場合は中央線が書かれるよ
-"""
-
+creep_vel = 7.5/3.6 #クリープ現象におけるトップスピード
+def creep_acc(vel):
+    #creep_velに達するまでは0.15で加速、それを超えたら0.15で減速
+    if abs(vel) > creep_vel:
+        return -0.15
+    elif abs(vel) <= creep_vel:
+        return 0.15
+    
 ###視点移動の有無はここで切り替え！###
 center_attach = True
 ################################
-attach_pos = np.array([0.0,10.0])
+attach_pos = np.array([0.0,5.0])
+
+
+##################経路生成#################
+
+# 一定以下の角度だと練習にならないので、一定以上になるようにrandom.choice([-1,1])*random.uniform(math.pi*0.4,math.pi*0.75) と言う形にする
+
+#定義時にデフォルト変数としてrandomを入れると定義時のrandomで固定されるので注意！
+def make_corner(L1=None,L2=None,theta1=None,theta2=None):
+    #何らかの曲がり角を作る
+    if L1==None:
+        L1 = random.randint(8,15)
+    if L2==None:
+        L2 = random.randint(8,15)
+    if theta1==None:
+        theta1 = random.choice([-1,1])*random.uniform(math.pi*0.3,math.pi*0.5)
+    if theta2==None:
+        theta2 = random.choice([-1,1])*random.uniform(math.pi*0.3,math.pi*0.5)
+    return ([L1,L2],[theta1,theta2])
+
+def make_curve(init_theta,fin_theta=None,total_len = None):
+    #何らかのカーブを作る
+    if fin_theta==None:
+        fin_theta=random.choice([-1,1])*random.uniform(math.pi*0.3,math.pi*0.5)
+    if total_len==None:
+        total_len = random.randint(8,20)
+    num = int(total_len/0.25)
+    Ls = [0.25]*num
+    thetas = [(fin_theta-init_theta)/num]*num
+    return (Ls,thetas)
+
+
+## 左折
+[Ls_lc,thetas_lc] = make_corner(10,20,0,math.pi/2)
+## 右折
+[Ls_rc,thetas_rc] = make_corner(10,20,0,-math.pi/2)
+## S字クランク
+[Ls_sc,thetas_sc] = make_corner(10,10,0,math.pi/2)
+[Ls_temp,thetas_temp] = make_corner(5,5,-math.pi/2,0)
+Ls_sc += Ls_temp
+thetas_sc += thetas_temp
+
+## S字カーブ
+[Ls_scv,thetas_scv] = make_curve(0,math.pi*0.75,10)
+[Ls_temp,thetas_temp] = make_curve(0,-math.pi*0.75,10)
+Ls_scv += Ls_temp
+thetas_scv += thetas_temp
+
+##ランダムな道
+[Ls_rand,thetas_rand] = make_corner(theta1=0)
+for i in range(30):
+    cuv_or_c = random.randint(0,1)
+    if cuv_or_c == 0:
+        #カーブにする
+        [Ls_temp,thetas_temp] = make_curve(init_theta=thetas_rand[-1])
+    else:
+        #コーナーにする
+        [Ls_temp,thetas_temp] = make_corner()
+    Ls_rand += Ls_temp
+    thetas_rand += thetas_temp
+
+
+##################################
+
 
 def Rot(theta):
   ret = np.array([[math.cos(theta),-math.sin(theta)],[math.sin(theta),math.cos(theta)]])
@@ -106,6 +170,14 @@ def main():
     pygame.display.set_caption('Trajectory')   # 画面のタイトルを設定する
     font = pygame.font.Font(None, 60)
 
+    if center_attach:
+        control_offset = YY(attach_pos[1])-OFFSET-30
+    else:
+        control_offset = OFFSET
+    
+    ampbar_ht = control_offset*0.8
+    ampbar_wid = 30
+
     #車を作成
     start_pos = [0.0,0.0]
     car1 = Car(np.array(start_pos))
@@ -161,11 +233,13 @@ def main():
 
 
     def draw_road(start_pos,Ls,wid,num,thetas):
-        #長さLs,角度thetasの曲がった道
+        #長さLs,角度thetasの曲がった道。thetasは前の道からの相対角度。
+        pre_theta = 0
         p0 = np.array(start_pos)
         linepoints = []
         for i in range(len(Ls)):
-            dir = vec(thetas[i])
+            dir = vec(thetas[i]+pre_theta)
+            pre_theta = thetas[i]+pre_theta
             vdir = np.dot(Rot(math.pi/2),dir)
             
             p1 = p0+dir*Ls[i]
@@ -199,21 +273,41 @@ def main():
 
             
 
-    image = pygame.transform.rotozoom(pygame.image.load("handle.png").convert(), 0, 0.2)
+    image = pygame.transform.rotozoom(pygame.image.load("handle2.png").convert(), 0, 0.2)
     handle_diam = image.get_width()
     def draw_handle(steer):
         rotated_image = pygame.transform.rotozoom(image,math.degrees(steer*15),1)
         img_w = rotated_image.get_width()
         img_h = rotated_image.get_height()
-        pygame.draw.circle(screen,(180,255,0),[(SCREEN_SIZE[0])/2,SCREEN_SIZE[1]-(OFFSET)/2],handle_diam/1.5)
-        screen.blit(rotated_image,[(SCREEN_SIZE[0]-img_w)/2,SCREEN_SIZE[1]-(OFFSET+img_h)/2])
+        #pygame.draw.circle(screen,(0,200,200),[(SCREEN_SIZE[0])/2,SCREEN_SIZE[1]-OFFSET+60],handle_diam/1.5)
+        screen.blit(rotated_image,[(SCREEN_SIZE[0]-img_w)/2,SCREEN_SIZE[1]-img_h/2-60])
         
     steers = []
     def draw_graph():
         #ステアの履歴を描き出したい　一旦後？
         return
+
+    def draw_ampbar(amp,br_ac):
+        #ブレーキやアクセルの強さを表示できる
+        # ampはパーセント表示
+        if br_ac == 0:
+            #br_ac=0がブレーキ
+            color = (200,0,0)
+            margin = 10
+        elif br_ac == 1:
+            #br_ac=1がアクセル
+            color = (0,200,200)
+            margin = SCREEN_SIZE[0]-ampbar_wid-10
+        pygame.draw.rect(screen,color,(margin,SCREEN_SIZE[1]-control_offset*0.9,ampbar_wid,ampbar_ht),width=1)
+        pygame.draw.rect(screen,color,(margin,SCREEN_SIZE[1]-control_offset*0.9+ampbar_ht*(1-amp),ampbar_wid,ampbar_ht*amp))
+
+    
+
+        
+        
+
     while True:
-        screen.fill((255, 255, 255))
+        screen.fill((0, 0, 0))
         #ギアとブレーキの操作
         pressed_key = pygame.key.get_pressed()
         if pressed_key[K_w]:
@@ -222,6 +316,8 @@ def main():
         if pressed_key[K_s]:
             #バックギア
             vel_coef = -1.0
+        
+        """
         if pressed_key[K_LSHIFT]:
             #ブレーキ
             #一般的なブレーキは最大で0.6G程度だが、0.4G程度を超えると急ブレーキと感じられやすい
@@ -230,6 +326,7 @@ def main():
                 car1.vel = max(car1.vel-break_acc*dt,0.0)
             else:
                 car1.vel = min(car1.vel+break_acc*dt,0.0)
+        """
         if pressed_key[K_r]:
             #リセット
             car1 = Car(np.array(start_pos))
@@ -245,15 +342,36 @@ def main():
         steer = max(steer,-math.pi/5)
         steer = min(steer,math.pi/5)
         #ステア表示
-        steer_disp = font.render(f'steer: {int(math.degrees(steer))} [deg]', True, (0, 0, 0))
+        steer_disp = font.render(f'steer: {int(math.degrees(steer))} [deg]', True, (0, 200, 200))
 
-        #アクセル
+        #アクセルとブレーキ
         # 一般車の最大加速度は0.6G程度より、マウスが一番上に来たあたりで0.6Gにする
         # クリープがあるので0.15m/s^2程度はデフォルトでかけておく
-        acc = max((SCREEN_SIZE[1]-OFFSET-mouseY),0)*(0.6*9.8/(SCREEN_SIZE[1]-OFFSET))+0.15
-        car1.vel += vel_coef*acc*dt
-        #アクセル表示
-        vel_disp = font.render(f'vel: {int(car1.vel*3.6)} [km/h]', True, (0, 0, 0))
+
+        accel_amp = 0
+        brake_amp = 0
+        if (SCREEN_SIZE[1]-control_offset-NT_ZONE_HT-mouseY)>=0:
+            #control_offsetより上ならアクセル
+            accel_amp = (SCREEN_SIZE[1]-control_offset-NT_ZONE_HT-mouseY)/(SCREEN_SIZE[1]-control_offset)
+            acc = accel_amp*9.8*0.6+creep_acc(car1.vel)
+            car1.vel += vel_coef*acc*dt
+        elif SCREEN_SIZE[1]-control_offset-NT_ZONE_HT <= mouseY <= SCREEN_SIZE[1]-control_offset:
+            #ニュートラルゾーン内にある(アクセルもブレーキも踏んでいない)
+            acc = creep_acc(car1.vel)
+            car1.vel += vel_coef*acc*dt
+        else:
+            #control_offsetより下ならブレーキ。これも最大0.6G程度。
+            brake_amp = (control_offset-(SCREEN_SIZE[1]-mouseY))/(control_offset)
+            #Lshiftでも0.4G減速可能
+            if pressed_key[K_LSHIFT]:
+                brake_amp=0.4/0.6
+            brakedcc = brake_amp*0.6*9.8
+            if car1.vel>=0:
+                car1.vel += (-brakedcc+vel_coef*creep_acc(car1.vel))*dt
+            elif car1.vel<0:
+                car1.vel += (brakedcc+vel_coef*creep_acc(car1.vel))*dt
+        #速度表示
+        vel_disp = font.render(f'vel: {int(car1.vel*3.6)} [km/h]', True, (0, 200, 200))
 
         #print(steer)
         #print(car1.pos)
@@ -264,29 +382,21 @@ def main():
         car1.step_move(steer)
 
 
-        #道の描画
-
-        ## 左折
-        [start_pos_lc,Ls_lc,thetas_lc]=[[start_pos[0]+1.9,0],[10,20],[0,math.pi/2]]
-        #draw_road(start_pos_lc,Ls_lc,3.5,1,thetas_lc)
-
-        ##右折
-        [start_pos_rc,Ls_rc,thetas_rc]=[[start_pos[0]+1.5,0],[10,20],[0,-math.pi/2]]
-        #draw_road(start_pos_rc,Ls_rc,3.5,1,thetas_rc)
-
-        ## カーブは..まあなんとかなるかな
-
-        ##S字クランク
-        [start_pos_sc,Ls_sc,thetas_sc]=[[start_pos[0],0],[10,10,10],[0,math.pi/2,0]]
-        #draw_road(start_pos_sc,Ls_sc,3.5,1,thetas_sc)
-
-        ##S字カーブ
-        [start_pos_scv,Ls_scv,thetas_scv]=[[start_pos[0],0],[10]+[0.25]*80+[10],[0]+list(np.linspace(0,math.pi*0.75,40))+list(np.linspace(math.pi*0.75,0,40))+[0]]
-        #draw_road(start_pos_scv,Ls_scv,3.5,1,thetas_scv)
+        ####################道の描画#####################
+        #「経路生成」コメントのところで作った経路を使う
 
         ##複合経路も作れる
-        draw_road(start_pos_sc,Ls_sc+Ls_scv,4,1,thetas_sc+thetas_scv)
+        #draw_road(start_pos,Ls_rc+Ls_sc+Ls_scv+Ls_lc,7,2,thetas_rc+thetas_sc+thetas_scv+thetas_lc)
+
+        ## ランダムな道
+        draw_road(start_pos+np.array([1.5,0]),Ls_rand,7,2,thetas_rand)
+        
+        ##################################################
         # 車輪の軌跡の描画
+        lf_rec = lf_rec[max(0,len(lf_rec)-1000):]
+        rf_rec = rf_rec[max(0,len(rf_rec)-1000):]
+        lb_rec = lb_rec[max(0,len(lb_rec)-1000):]
+        rb_rec = rb_rec[max(0,len(rb_rec)-1000):]
         for rec in [lf_rec,rf_rec,lb_rec,rb_rec]:
             for r in rec:
                 if center_attach:
@@ -303,13 +413,19 @@ def main():
         rb_rec.append(car1.rb.abs_pos)
         
         #オフセットライン描画
-        pygame.draw.line(screen,(0,0,0),[0,SCREEN_SIZE[1]-OFFSET],[SCREEN_SIZE[0],SCREEN_SIZE[1]-OFFSET],width=2)
+        pygame.draw.line(screen,(0,200,200),[0,SCREEN_SIZE[1]-control_offset],[SCREEN_SIZE[0],SCREEN_SIZE[1]-control_offset],width=1)
+        #ニュートラルゾーン描画
+        pygame.draw.line(screen,(0,200,200),[0,SCREEN_SIZE[1]-control_offset-NT_ZONE_HT],[SCREEN_SIZE[0],SCREEN_SIZE[1]-control_offset-NT_ZONE_HT],width=1)
 
         #ハンドルを描画
         draw_handle(steer)
         #テキスト描画
-        screen.blit(steer_disp, [0,SCREEN_SIZE[1]-(OFFSET)/2])
-        screen.blit(vel_disp,[SCREEN_SIZE[0]-300,SCREEN_SIZE[1]-OFFSET/2])
+        screen.blit(steer_disp, [SCREEN_SIZE[0]/2-steer_disp.get_width()-100,SCREEN_SIZE[1]-steer_disp.get_height()-10])
+        screen.blit(vel_disp,[SCREEN_SIZE[0]-vel_disp.get_width()-150,SCREEN_SIZE[1]-steer_disp.get_height()-10])
+        #アクセル・ブレーキバー描画
+        draw_ampbar(brake_amp,0)
+        draw_ampbar(accel_amp,1)
+
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
