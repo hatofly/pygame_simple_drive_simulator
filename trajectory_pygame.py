@@ -1,3 +1,5 @@
+#!python3
+
 import numpy as np
 import pygame
 from pygame.locals import *
@@ -134,6 +136,8 @@ class Car:
         self.length = 4.6
         self.wh_bs = 2.75
         self.vel = vel
+        self.center = self.pos+vec(self.theta)*self.wh_bs/2
+        self.old_vel_vec = self.vel*vec(self.theta)
         self.lf = wheel(-self.wid/2,self.wh_bs,self.pos,self.theta)
         self.rf = wheel(self.wid/2,self.wh_bs,self.pos,self.theta)
         self.lb = wheel(-self.wid/2,0,self.pos,self.theta)
@@ -199,11 +203,26 @@ def main():
     def draw_point(p):
         pygame.draw.circle(screen,(0,0,255),(p[0]*DRAW_SCALE+SCREEN_SIZE[0]/2,SCREEN_SIZE[1]-OFFSET-p[1]*DRAW_SCALE),1)
 
+
     def draw_polygon_filled(ps,color):
         ps_sc = []
         for p in ps:
             ps_sc.append(XY(p))
         pygame.draw.polygon(screen,color,ps_sc)
+
+    def draw_arrow(p1,p2):
+        if np.linalg.norm(p2-p1)<0.1:
+            return
+        else:
+            P1 = XY(p1)
+            P2 = XY(p2)
+            #矢印の軸部分
+            pygame.draw.lines(screen,(255,0,200),False,[P1,P2],width=1)
+            #三角部分
+            arr_dir = (p2-p1)/np.linalg.norm(p2-p1)/2
+            vert = np.dot(Rot(math.pi/2),arr_dir)/3
+            draw_polygon_filled([p2,p2-arr_dir+vert,p2-arr_dir-vert],(255,0,200))
+
 
     def draw_carbody(car):
         p1 = car.pos + np.dot(Rot(car.theta),np.array([car.wid/2,(car.length+car.wh_bs)/2]))
@@ -344,6 +363,8 @@ def main():
         #ステア表示
         steer_disp = font.render(f'steer: {int(math.degrees(steer))} [deg]', True, (0, 200, 200))
 
+        #1step前の速度ベクトル
+        car1.old_vel_vec = car1.vel*vec(car1.theta)
         #アクセルとブレーキ
         # 一般車の最大加速度は0.6G程度より、マウスが一番上に来たあたりで0.6Gにする
         # クリープがあるので0.15m/s^2程度はデフォルトでかけておく
@@ -367,9 +388,10 @@ def main():
                 brake_amp=0.4/0.6
             brakedcc = brake_amp*0.6*9.8
             if car1.vel>=0:
-                car1.vel += (-brakedcc+vel_coef*creep_acc(car1.vel))*dt
+                car1.vel = max(car1.vel + (-brakedcc+vel_coef*creep_acc(car1.vel))*dt,0)
             elif car1.vel<0:
-                car1.vel += (brakedcc+vel_coef*creep_acc(car1.vel))*dt
+                car1.vel = min(car1.vel + (brakedcc+vel_coef*creep_acc(car1.vel))*dt,0)
+
         #速度表示
         vel_disp = font.render(f'vel: {int(car1.vel*3.6)} [km/h]', True, (0, 200, 200))
 
@@ -411,7 +433,17 @@ def main():
         rf_rec.append(car1.rf.abs_pos)
         lb_rec.append(car1.lb.abs_pos)
         rb_rec.append(car1.rb.abs_pos)
-        
+
+        #慣性力表示
+        #正味の慣性力ベクトル/質量
+        net_acc_vec = (car1.old_vel_vec-car1.vel*vec(car1.theta))/dt
+        car1.center = car1.pos+vec(car1.theta)*car1.wh_bs/2
+        acc_point = car1.center+net_acc_vec/3
+        if center_attach:
+            car1.center = Trans(car1.center,car1.theta,car1.pos)
+            acc_point = Trans(acc_point,car1.theta,car1.pos)
+        draw_arrow(car1.center,acc_point)
+
         #オフセットライン描画
         pygame.draw.line(screen,(0,200,200),[0,SCREEN_SIZE[1]-control_offset],[SCREEN_SIZE[0],SCREEN_SIZE[1]-control_offset],width=1)
         #ニュートラルゾーン描画
